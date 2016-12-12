@@ -1,3 +1,5 @@
+package com.levonk.tool.ssl.sslmonitor;
+
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URL;
@@ -10,6 +12,7 @@ import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.time.ZoneId;
 import java.util.Date;
+import java.util.Set;
 
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
@@ -20,6 +23,12 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSession;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
+
+import org.jclouds.ContextBuilder;
+import org.jclouds.compute.ComputeService;
+import org.jclouds.compute.ComputeServiceContext;
+import org.jclouds.compute.domain.ComputeMetadata;
+import org.jclouds.ec2.domain.SecurityGroup;
 
 import com.godaddy.logging.Logger;
 import com.godaddy.logging.LoggerFactory;
@@ -36,15 +45,19 @@ public class SSLPoke
 
 	private static class BogusTrustManager implements X509TrustManager
 	{
+		public BogusTrustManager() {
+			// TODO Auto-generated constructor stub
+		}
+
 		@Override
 		public void checkClientTrusted( X509Certificate[] certs, String arg )
 				throws CertificateException
-		{ }
+		{ /* unecessary */ }
 
 		@Override
 		public void checkServerTrusted( X509Certificate[] certs, String arg )
 				throws CertificateException
-		{ }
+		{ /* unecessary */ }
 
 		@Override
 		public X509Certificate[] getAcceptedIssuers()
@@ -58,8 +71,8 @@ public class SSLPoke
 	{
 		if ( (2 != args.length) && (1 != args.length) )
 		{
-			System.out.println( "Usage: " + SSLPoke.class.getName()
-					+ " <host> <port>" );
+			System.out.println( Messages.getString("SSLPoke.USAGE_PREFIX") + SSLPoke.class.getName() //$NON-NLS-1$
+					+ Messages.getString("SSLPoke.USAGE_ARGS") ); //$NON-NLS-1$
 			System.exit(1);
 		}
 		final String server = args[0];
@@ -70,40 +83,40 @@ public class SSLPoke
 			try {
 				port = Integer.parseInt( args[1] );
 			} catch (NumberFormatException ex) {
-				SSLPoke.log.with(ex).error("Unable to parse port");
+				SSLPoke.log.with(ex).error(Messages.getString("SSLPoke.USAGE_WARN_PORT")); //$NON-NLS-1$
 			}
 		}
 
-		SSLPoke poke = new SSLPoke();
 		boolean bSucc = false;
-		bSucc = poke.testConnect( server, port );
-		bSucc &= poke.testSSLDate( server, port );
-		SSLPoke.log.with(bSucc).info( "SSL Test final result" );
+		bSucc = SSLPoke.testConnect( server, port );
+		bSucc &= SSLPoke.testSSLDate( server, port );
+		SSLPoke.log.with(Boolean.valueOf(bSucc)).info( Messages.getString("SSLPoke.RESPONSE_HEADING") ); //$NON-NLS-1$
 	}
 
 	/**
 	 * Test SSL connect.
 	 */
-	private boolean testConnect( final String server, int port )
+	private static boolean testConnect( final String server, int port )
 	{
-		try {
-			final SSLSocketFactory sslSocketFactory = (SSLSocketFactory)SSLSocketFactory.getDefault();
-			final SSLSocket sslsocket = (SSLSocket)sslSocketFactory.createSocket( server, port );
+		final SSLSocketFactory sslSocketFactory = (SSLSocketFactory)SSLSocketFactory.getDefault();	
 
+		try (
+			final SSLSocket sslsocket = (SSLSocket)sslSocketFactory.createSocket(server, port);
 			final InputStream in = sslsocket.getInputStream();
 			final OutputStream net = sslsocket.getOutputStream();
+		) {
 
 			// Write a test byte to get a response
 			net.write(1);
 
 			while ( 0 < in.available() )
 			{
-				SSLPoke.log.info(in.read());
+				SSLPoke.log.debug(Messages.getString("SSLPoke.RESPONSE_BYTES_READ"), Integer.valueOf(in.read())); //$NON-NLS-1$
 			}
 			return true;
 
 		} catch (Exception ex ) {
-			SSLPoke.log.with(ex).error("trying to open source and read output");
+			SSLPoke.log.with(ex).error(Messages.getString("SSLPoke.EXCEPT_SSLCONNECT")); //$NON-NLS-1$
 		}
 		return false;
 	}
@@ -111,10 +124,10 @@ public class SSLPoke
 	/**
 	 * Test SSL date/
 	 */
-	private boolean testSSLDate( final String server, int port )
+	private static boolean testSSLDate( final String server, int port )
 	{
 		try {
-			final SSLContext ctx = SSLContext.getInstance( "TLS" );
+			final SSLContext ctx = SSLContext.getInstance( "TLS" ); //$NON-NLS-1$
 			ctx.init( new KeyManager[0], new TrustManager[]
 					{
 						new BogusTrustManager()
@@ -123,7 +136,7 @@ public class SSLPoke
 					);
 			SSLContext.setDefault( ctx );
 
-			final URL url = new URL( "https://" + server + ":" + Integer.toString(port) + "/" );
+			final URL url = new URL( "https://" + server + ":" + Integer.toString(port) + "/" ); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
 			final HttpsURLConnection conn = (HttpsURLConnection)url.openConnection();
 			conn.setHostnameVerifier( new HostnameVerifier() {
 					@Override
@@ -131,7 +144,7 @@ public class SSLPoke
 						return true;
 					}
 			});
-			SSLPoke.log.with(conn.getResponseCode()).info("Response Code");
+			SSLPoke.log.with(Integer.valueOf(conn.getResponseCode())).info(Messages.getString("SSLPoke.RESPONSE_CODE")); //$NON-NLS-1$
 			Certificate[] certs = conn.getServerCertificates();
 			for ( Certificate cert : certs )
 			{
@@ -151,7 +164,10 @@ public class SSLPoke
 				final LocalDate todayLD = LocalDate.now();
 				if ( todayLD.isAfter(warnDate)  )
 				{
-					SSLPoke.log.with(server).with(port).with(x509).with(x509.getNotAfter()).warn( "Certificate will expire within " + EXPIRE_WARN_MONTHS + " months" );
+					SSLPoke.log.with(server).with(Integer.valueOf(port))
+							.with(x509).with(x509.getNotAfter())
+							.warn( Messages.getString("SSLPoke.CERT_EXPIRE_WITHIN") //$NON-NLS-1$
+							+ EXPIRE_WARN_MONTHS + Messages.getString("SSLPoke.MONTHS") ); //$NON-NLS-1$
 					return false;
 				}
 			}
@@ -159,10 +175,29 @@ public class SSLPoke
 			conn.disconnect();
 			return true;
 		} catch (Exception ex ) {
-			SSLPoke.log.with(ex).error("trying to check expiration date");
+			SSLPoke.log.with(ex).error(Messages.getString("SSLPoke.EXCEPT_EXPIRE_DATE")); //$NON-NLS-1$
 		}
 		return false;
-
+	}
+	
+	private static final ComputeService getCompute()
+	{
+		final String provider = "us-east-1";
+		final String identity = "identity";
+		final String credential = "credential";
+		ContextBuilder builder = ContextBuilder.newBuilder(provider )
+				.credentials(identity, credential);
+		return builder.buildView(SecurityGroup.class).getComputeService();
+	}
+	
+	private static final getLoadBalancers( final ComputeService compute )
+	{
+		Set<SecurityGroup> listNodes = compute.li .listNodes();
+		for ( SecurityGroup sg : listNodes )
+		{
+			cm.
+		}
+	
 	}
 }
 
